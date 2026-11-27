@@ -1,4 +1,4 @@
-from playwright.sync_api import Page, Locator
+from playwright.sync_api import Page, Locator, Dialog, expect
 from pages.base_page import BasePage
 
 
@@ -45,11 +45,6 @@ class PortfolioPage(BasePage):
         """Retorna a última linha inserida na tabela para o ativo informado."""
         return self.linhas_tabela_carteira.filter(has_text=nome_ativo).last
 
-    def excluir_primeiro_ativo(self):
-        """Clica no botão de exclusão da primeira linha da tabela."""
-        botao_excluir = self.linhas_tabela_carteira.first.locator("[data-testid^='btn-delete-asset-']")
-        botao_excluir.click()
-
     def total_de_ativos_listados(self) -> int:
         """Retorna o número atual de registros na tabela da carteira ignorando a mensagem de vazio."""
         self.page.wait_for_selector("[data-testid='table-portfolio'] tbody", timeout=5000)
@@ -61,3 +56,41 @@ class PortfolioPage(BasePage):
     def obter_linha_por_ativo(self, nome_ativo: str) -> Locator:
         """Retorna a última linha da tabela para o ativo informado."""
         return self.linhas_tabela_carteira.filter(has_text=nome_ativo).last
+
+    def excluir_linha(self, linha: Locator,
+                      confirmar: bool = True) -> list[str]:
+        """Exclui a linha, tratando a confirmação. Retorna as mensagens."""
+        mensagens: list[str] = []
+
+        def tratar_dialogo(dialogo: Dialog):
+            mensagens.append(dialogo.message)
+            if confirmar:
+                dialogo.accept()
+            else:
+                dialogo.dismiss()
+
+        # O listener precisa existir antes do clique
+        self.page.on("dialog", tratar_dialogo)
+        try:
+            linha.locator("[data-testid^='btn-delete-asset-']").click()
+        finally:
+            self.page.remove_listener("dialog", tratar_dialogo)
+        return mensagens
+
+    def excluir_primeiro_ativo(self) -> list[str]:
+        """Exclui o ativo da primeira linha da tabela."""
+        return self.excluir_linha(self.linhas_tabela_carteira.first)
+
+    def aguardar_patrimonio_estavel(self) -> str:
+        """Espera o card de Patrimônio Total parar de mudar."""
+        expect(self.card_patrimonio_total).to_be_visible()
+        anterior = self.card_patrimonio_total.inner_text()
+        repeticoes = 0
+        for _ in range(20):
+            self.page.wait_for_timeout(500)
+            atual = self.card_patrimonio_total.inner_text()
+            repeticoes = repeticoes + 1 if atual == anterior else 0
+            if repeticoes >= 2:
+                return atual.strip()
+            anterior = atual
+        raise AssertionError("O card de Patrimônio Total não estabilizou.")
